@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "rxQNiKDzXqPfzL9dMTgOhtaTC1ItGoj5NnZAuCyslIGBeZbF/9o5OArbJQByRshttJyW/fVNnGdOZ3OWPCo+bQ==",
+  "success": true,
+  "projectFilePath": "/home/badino/bbs/bbs.csproj",
+  "expectedPackageFiles": [
+    "/home/badino/.nuget/packages/stub.system.data.sqlite.core.netstandard/1.0.114.3/stub.system.data.sqlite.core.netstandard.1.0.114.3.nupkg.sha512",
+    "/home/badino/.nuget/packages/system.data.sqlite.core/1.0.114.3/system.data.sqlite.core.1.0.114.3.nupkg.sha512"
+  ],
+  "logs": []
+}
