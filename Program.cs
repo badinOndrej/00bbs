@@ -107,7 +107,11 @@ namespace bbs
                         state = State.login;
                         break;
                     case State.login:
-                        cmd.CommandText = $"SELECT COUNT(*), id FROM users WHERE username LIKE \"{username}\" AND password LIKE \"{password}\"";
+                        cmd = new SQLiteCommand(conn);
+                        cmd.CommandText = "SELECT COUNT(*), id FROM users WHERE username LIKE @username AND password LIKE @password";
+                        cmd.Parameters.AddWithValue("@username", username);
+                        cmd.Parameters.AddWithValue("@password", password);
+                        cmd.Prepare();
                         var reader = cmd.ExecuteReader();
                         while(reader.Read()) {
                             if(reader.GetInt32(0) != 1) {
