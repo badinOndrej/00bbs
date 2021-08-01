@@ -181,6 +181,7 @@ namespace bbs
                                 state = State.mainMenu;
                                 break;
                         }
+                        cmd = new SQLiteCommand(conn);
                         cmd.CommandText = "SELECT message, posted, username FROM bulletin, users WHERE bulletin.uid = users.id";
                         var rdr = cmd.ExecuteReader();
                         bulletinIndex = 0;
