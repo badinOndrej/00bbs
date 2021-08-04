@@ -50,7 +50,7 @@ namespace bbs
         }
 
         private string GetString(byte[] data) {
-            return Regex.Replace(Encoding.ASCII.GetString(data), "\\W", "");
+            return Regex.Replace(Encoding.ASCII.GetString(data), "[^ -~]+", "");
         }
 
         public void Job() {
@@ -73,6 +73,11 @@ namespace bbs
             int bulletinIndex = 0;
             List<string[]> bulletin = new List<string[]>();
             List<DateTime> bulletinDates = new List<DateTime>();
+
+            int messageIndex = 0;
+            List<string[]> messages = new List<string[]>();
+            List<DateTime> messagesDates = new List<DateTime>();
+            List<int> messageIds = new List<int>();
 
             bool done = false;
             while(!done) {
@@ -127,17 +132,34 @@ namespace bbs
                         reader.Close();
                         break;
                     case State.mainMenu:
+                        // load new messages
+                        cmd = new SQLiteCommand(conn);
+                        cmd.CommandText = "SELECT id, message, fromuser, (SELECT username FROM users WHERE users.id = messages.fromuser) AS fromusername, sent FROM messages WHERE touser = @touser";
+                        cmd.Parameters.AddWithValue("@touser", uid);
+                        cmd.Prepare();
+                        reader = cmd.ExecuteReader();
+                        messages = new List<string[]>();
+                        messageIds = new List<int>();
+                        messagesDates = new List<DateTime>();
+                        if(reader.HasRows)
+                            while(reader.Read()) {
+                                messages.Add(new string[]{reader.GetString(3), reader.GetString(1)});
+                                messageIds.Add(reader.GetInt32(0));
+                                messagesDates.Add(reader.GetDateTime(4));
+                            }
+                        messageIndex = messages.Count - 1;
+                        // render the main menu
                         SendBytes($"\fWelcome to 00bbs, {username}!\r\n\n");
                         SendBytes("--- MAIN MENU ---\r\n\n");
-                        SendBytes("1) (N)ew messages\r\n2) (W)rite a message\r\n3) (B)ulletin board\r\n4) (G)oodbye\r\n\n> ");
+                        SendBytes($"1) (R)ead messages ({messages.Count})\r\n2) (W)rite a message\r\n3) (B)ulletin board\r\n4) (G)oodbye\r\n\n> ");
                         data = new byte[1024];
                         length = s.Receive(data, 0, 1024, SocketFlags.None);
                         if(length == 0) done = true;
                         string command = GetString(data);
                         switch(command) {
                             case "1":
-                            case "n":
-                            case "N":
+                            case "r":
+                            case "R":
                                 state = State.newMessages;
                                 break;
                             case "2":
@@ -154,6 +176,54 @@ namespace bbs
                             case "g":
                             case "G":
                                 state = State.goodbye;
+                                break;
+                        }
+                        break;
+                    case State.newMessages:
+                        if(messages.Count == 0) {
+                            state = State.mainMenu;
+                            break;
+                        }
+                        SendBytes($"\f\n\n--- READ MESSAGES - {messageIndex + 1} OUT OF {messages.Count} ---\r\n\n");
+                        SendBytes($"FROM: {messages[messageIndex][0]}\r\n");
+                        SendBytes($"POSTED @ {messagesDates[messageIndex]}\r\n\n");
+                        SendBytes($"MESSAGE:\r\n{messages[messageIndex][1]}\r\n\n");
+                        SendBytes("1) (N)ext\r\n2) (P)revious\r\n3) (D)elete\r\n4) (M)enu\r\n\n> ");
+                        data = new byte[1024];
+                        length = s.Receive(data, 0, 1024, SocketFlags.None);
+                        if(length == 0) done = true;
+                        command = GetString(data);
+                        switch(command) {
+                            case "1":
+                            case "n":
+                            case "N":
+                                messageIndex++;
+                                if(messageIndex >= messages.Count) messageIndex = messages.Count - 1;
+                                break;
+                            case "2":
+                            case "p":
+                            case "P":
+                                messageIndex--;
+                                if(messageIndex < 0) messageIndex = 0;
+                                break;
+                            case "3":
+                            case "d":
+                            case "D":
+                                cmd = new SQLiteCommand(conn);
+                                cmd.CommandText = "DELETE FROM messages WHERE id = @id";
+                                cmd.Parameters.AddWithValue("@id", messageIds[messageIndex]);
+                                cmd.Prepare();
+                                cmd.ExecuteNonQuery();
+                                messages.RemoveAt(messageIndex);
+                                messageIds.RemoveAt(messageIndex);
+                                messagesDates.RemoveAt(messageIndex);
+                                if(messageIndex >= messages.Count) messageIndex--;
+                                if(messageIndex == 0) if(messages.Count == 0) state = State.mainMenu;
+                                break;
+                            case "4":
+                            case "m":
+                            case "M":
+                                state = State.mainMenu;
                                 break;
                         }
                         break;
@@ -222,6 +292,33 @@ namespace bbs
                             case "M":
                                 state = State.bulletinBoard;
                                 break;
+                        }
+                        break;
+                    case State.newBulletin:
+                        if(uid == 1) {
+                            SendBytes("\f\n\nGUESTS CANNOT PIN MESSAGES TO THE BULLETIN BOARD\r\n\nPRESS ENTER TO RETURN");
+                            data = new byte[1024];
+                            length = s.Receive(data, 0, 1024, SocketFlags.None);
+                            if(length == 0) done = true;
+                            state = State.bulletinBoard;
+                        } else {
+                            SendBytes("\f\n\n--- BULLETIN BOARD - NEW MESSAGE ---\r\n\n");
+                            SendBytes("Write your message and confirm by pressing ENTER\r\nTo cancel, write nothing and press ENTER\r\n\nMESSAGE:\r\n\n");
+                            data = new byte[1024];
+                            length = s.Receive(data, 0, 1024, SocketFlags.None);
+                            if(length == 0) done = true;
+                            string message = GetString(data);
+                            if(message.Length > 0) {
+                                Console.WriteLine($"New post from {username}");
+                                cmd = new SQLiteCommand(conn);
+                                cmd.CommandText = "INSERT INTO bulletin (message, uid, posted) VALUES (@message, @uid, @posted)";
+                                cmd.Parameters.AddWithValue("@message", message);
+                                cmd.Parameters.AddWithValue("@uid", uid);
+                                cmd.Parameters.AddWithValue("@posted", DateTime.Now);
+                                cmd.Prepare();
+                                cmd.ExecuteNonQuery();
+                            }
+                            state = State.bulletinBoard;
                         }
                         break;
                     case State.goodbye:
