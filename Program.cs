@@ -35,7 +35,7 @@ namespace bbs
         private byte[] data = new byte[1024];
 
         private enum State {
-            attract, username, password, login, mainMenu, goodbye, newMessages, writeMessage, bulletinBoard, newBulletin, readBulletin
+            attract, username, password, login, mainMenu, goodbye, newMessages, writeMessageRecipient, writeMessage, bulletinBoard, newBulletin, readBulletin
         };
 
         public ConnectionJob(Socket s)
@@ -78,6 +78,8 @@ namespace bbs
             List<string[]> messages = new List<string[]>();
             List<DateTime> messagesDates = new List<DateTime>();
             List<int> messageIds = new List<int>();
+
+            int rid = -1;
 
             bool done = false;
             while(!done) {
@@ -147,6 +149,7 @@ namespace bbs
                                 messageIds.Add(reader.GetInt32(0));
                                 messagesDates.Add(reader.GetDateTime(4));
                             }
+                        reader.Close();
                         messageIndex = messages.Count - 1;
                         // render the main menu
                         SendBytes($"\fWelcome to 00bbs, {username}!\r\n\n");
@@ -165,7 +168,7 @@ namespace bbs
                             case "2":
                             case "w":
                             case "W":
-                                state = State.writeMessage;
+                                state = State.writeMessageRecipient;
                                 break;
                             case "3":
                             case "b":
@@ -226,6 +229,58 @@ namespace bbs
                                 state = State.mainMenu;
                                 break;
                         }
+                        break;
+                    case State.writeMessageRecipient:
+                        SendBytes("\f\n\n--- NEW MESSAGE ---\r\n\n");
+                        SendBytes($"TO (EMPTY TO CANCEL {(uid == 1 ? ", GUESTS CAN ONLY MAIL THE ADMIN" : "")})> ");
+                        data = new byte[1024];
+                        length = s.Receive(data, 0, 1024, SocketFlags.None);
+                        if(length == 0) done = true;
+                        string recipient = GetString(data);
+                        if(recipient.Equals("")) {
+                            state = State.mainMenu;
+                            break;
+                        }
+                        if(uid == 1) {
+                            SendBytes("USER IS GUEST, IGNORING AND SENDING TO ADMIN\r\n");
+                            recipient = "admin";
+                        }
+                        cmd = new SQLiteCommand(conn);
+                        cmd.CommandText ="SELECT id FROM users WHERE username LIKE @username";
+                        cmd.Parameters.AddWithValue("@username", recipient);
+                        cmd.Prepare();
+                        reader = cmd.ExecuteReader();
+                        if(reader.HasRows) {
+                            while(reader.Read())
+                                rid = reader.GetInt32(0);
+                            reader.Close();
+                        } else {
+                            SendBytes("\r\n\nINVALID USERNAME\r\nPRESS ENTER TO RETRY");
+                            data = new byte[1024];
+                            length = s.Receive(data, 0, 1024, SocketFlags.None);
+                            if(length == 0) done = true;
+                        }
+                        state = State.writeMessage;
+                        break;
+                    case State.writeMessage:
+                        SendBytes("\r\nMESSAGE (EMPTY TO CANCEL)>\r\n");
+                        data = new byte[1024];
+                        length = s.Receive(data, 0, 1024, SocketFlags.None);
+                        if(length == 0) done = true;
+                        string message = GetString(data);
+                        if(message.Equals("")) {
+                            state = State.mainMenu;
+                            break;
+                        }
+                        cmd = new SQLiteCommand(conn);
+                        cmd.CommandText = "INSERT INTO messages (message, fromuser, touser, sent) VALUES (@message, @fromuser, @touser, @sent)";
+                        cmd.Parameters.AddWithValue("@message", message);
+                        cmd.Parameters.AddWithValue("@fromuser", uid);
+                        cmd.Parameters.AddWithValue("@touser", rid);
+                        cmd.Parameters.AddWithValue("@sent", DateTime.Now);
+                        cmd.Prepare();
+                        cmd.ExecuteNonQuery();
+                        state = State.mainMenu;
                         break;
                     case State.bulletinBoard:
                         SendBytes("\f\n\n--- BULLETIN BOARD ---\r\n\n");
@@ -307,7 +362,7 @@ namespace bbs
                             data = new byte[1024];
                             length = s.Receive(data, 0, 1024, SocketFlags.None);
                             if(length == 0) done = true;
-                            string message = GetString(data);
+                            message = GetString(data);
                             if(message.Length > 0) {
                                 Console.WriteLine($"New post from {username}");
                                 cmd = new SQLiteCommand(conn);
